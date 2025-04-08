@@ -1,102 +1,123 @@
-Absolutely! Here's the updated and **final version of all 3 files** — with clean handling of the `artifactory_token` passed as an input (not `env`), using `frigate` and `pypi-remote`.
+To implement the `setup-azure-cli` functionality you described using GitHub Actions and Azure CLI, you can create two components: one for the Bash script (`az_cli_setup.sh`) and one for the `action.yml` file to define the steps in the GitHub Action workflow.
 
----
+### Step 1: Bash Script (`az_cli_setup.sh`)
 
-## ✅ 1. `.github/actions/azure-cli-setup/scripts/az_cli_setup.sh`
+The Bash script is responsible for installing JFrog CLI and the Azure CLI with the given version. You can use the following script template, which aligns with your example:
+
+#### `scripts/az_cli_setup.sh`:
 
 ```bash
 #!/bin/bash
+
 set -e
 
+# Retrieve the Azure CLI version passed as argument
 AZ_CLI_VERSION=${1}
 
-# Configure pip to use Frigate Artifactory (pypi-remote repo)
-jf pip-config --server-id-resolve frigate --repo-resolve pypi-remote
+# Install JFrog CLI if not already installed
+jf pip-config --server-id-resolve msartaz --repo-resolve pypi repo
 
-# Upgrade pip using Artifactory
+# Upgrade pip
 jf pip install pip --upgrade --no-warn-script-location --no-compile --disable-pip-version-check
 
-# Install the specified version of Azure CLI
+# Install Azure CLI
 jf pip install azure-cli==$AZ_CLI_VERSION --no-warn-script-location --no-compile --disable-pip-version-check
 
-# Add local bin to GitHub Actions PATH
-echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+# Add Azure CLI to the system PATH
+echo "$HOME/.local/bin" >> $GITHUB_PATH
 ```
 
----
+### Step 2: `action.yml` for GitHub Actions
 
-## ✅ 2. `.github/actions/azure-cli-setup/action.yml`
+The `action.yml` file defines the parameters (such as the Azure CLI version and Artifactory token) and sets up the necessary steps to run the Bash script within a GitHub Actions workflow.
+
+#### `action.yml`:
 
 ```yaml
-name: 'Azure CLI Setup'
-description: 'Omega - Azure CLI installation using Frigate Artifactory'
-
+name: 'Azure-cli Setup'
+description: 'Setup Azure CLI in your GitHub Actions environment'
 inputs:
   version:
     description: 'Version of Azure CLI to install'
     required: false
-    default: '2.69.0'
-  artifactory_token:
-    description: 'Frigate Artifactory token'
+    default: '2.66.0'
+  art_token:
+    description: 'Artifactory token'
     required: true
 
 runs:
   using: "composite"
   steps:
-    - name: Install JFrog CLI from Frigate
-      uses: MorganStanley-Actions/train.setup-jfrog-cli@prod
-      with:
-        saas-af-token: ${{ inputs.artifactory_token }}
-        version: 2.48.0
+    - name: Install JFrog CLI
+      uses: eaton-vance/setup-jfrog-cli@v4
 
-    - name: Setup Azure CLI via pip from Frigate
-      shell: bash
+    - name: Setup Azure CLI
       run: |
         chmod +x scripts/az_cli_setup.sh
         ./scripts/az_cli_setup.sh ${{ inputs.version }}
+      shell: bash
       working-directory: ${{ github.action_path }}
 ```
 
----
+### Step 3: GitHub Actions Workflow (Calling the Setup Action)
 
-## ✅ 3. `.github/workflows/setup-azure-cli.yml`
+In your GitHub Actions workflow file, you can use this custom action (`setup-azure-cli`) and call it to install the Azure CLI with the version specified by the input.
+
+#### Example `deploy_qa.yml`:
 
 ```yaml
-name: Setup Azure CLI via Frigate
+name: deploy QA
+
+permissions:
+  contents: write
+  actions: write
+  id-token: write
 
 on:
-  workflow_dispatch:
+  workflow_call:
+
+env:
+  ARTIFACTORY_TOKEN: ${{ secrets.ARTIFACTORY_TOKEN }}
 
 jobs:
-  setup-azure-cli:
-    runs-on: ubuntu-latest
+  deploy-arm-qa:
+    runs-on: azure-nonprod
+    environment:
+      name: qa
+    outputs:
+      release_number: ${{ steps.setup_release_number.outputs.TRAIN_RELEASE }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Check out the repo
+        uses: actions/checkout@v4
 
-      - name: Use custom Azure CLI setup action
-        uses: ./.github/actions/azure-cli-setup
+      - name: Install JFrog CLI
+        uses: eaton-vance/setup-jfrog-cli@v4
         with:
-          artifactory_token: ${{ secrets.ARTIFACTORY_TOKEN }}
-          version: '2.69.0'
+          version: 2.25.2
+          jfrog_token: ${{ secrets.ARTIFACTORY_TOKEN }}
+
+      - name: Setup Azure CLI
+        uses: ./path-to-your-action # Reference to your setup-azure-cli action
+        with:
+          version: 2.66.0
+          art_token: ${{ secrets.ARTIFACTORY_TOKEN }}
+
+      - name: Python Check
+        run: python -V && python -m pip -V
+        continue-on-error: true
 ```
 
----
+### Explanation:
 
-### 🔐 Secret Reminder
+1. **`az_cli_setup.sh`**: A Bash script that installs both JFrog CLI and Azure CLI with the specified version. It also ensures the necessary dependencies are updated (like pip).
 
-Make sure this secret exists:
+2. **`action.yml`**: A GitHub Action definition that provides inputs such as the version of the Azure CLI and Artifactory token. It then runs the Bash script to install the Azure CLI.
 
-```
-Repo → Settings → Secrets and Variables → Actions → New secret
-Name: ARTIFACTORY_TOKEN
-Value: <your-frigate-token>
-```
+3. **GitHub Actions Workflow (`deploy_qa.yml`)**: A job that uses the custom action `setup-azure-cli` to install the Azure CLI and performs other tasks (such as Python version checks). The workflow also integrates with JFrog CLI.
 
----
+Make sure that:
+- The Artifactory token is stored in GitHub Secrets.
+- The path to your custom action (`setup-azure-cli`) is correct.
 
-Let me know if you want to:
-- publish this to GitHub Marketplace,
-- bundle it into a shared repo for reuse,
-- or add validation/logging steps to the shell script.
+This setup should automate the installation of the Azure CLI as part of your deployment pipeline.
