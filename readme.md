@@ -1,12 +1,8 @@
-Absolutely! Here's the **full and correct setup** including:
-
-1. ✅ The **Bash script** (`az_cli_setup.sh`)
-2. ✅ The **Composite GitHub Action** (`action.yml`)
-3. ✅ The **GitHub Workflow file** (`setup-azure-cli.yml`)
+Absolutely! Here's the updated and **final version of all 3 files** — with clean handling of the `artifactory_token` passed as an input (not `env`), using `frigate` and `pypi-remote`.
 
 ---
 
-## 🧩 1. `scripts/az_cli_setup.sh`
+## ✅ 1. `.github/actions/azure-cli-setup/scripts/az_cli_setup.sh`
 
 ```bash
 #!/bin/bash
@@ -27,11 +23,9 @@ jf pip install azure-cli==$AZ_CLI_VERSION --no-warn-script-location --no-compile
 echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 ```
 
-> Save this script at: `.github/actions/azure-cli-setup/scripts/az_cli_setup.sh`
-
 ---
 
-## 🧩 2. `.github/actions/azure-cli-setup/action.yml`
+## ✅ 2. `.github/actions/azure-cli-setup/action.yml`
 
 ```yaml
 name: 'Azure CLI Setup'
@@ -42,7 +36,7 @@ inputs:
     description: 'Version of Azure CLI to install'
     required: false
     default: '2.69.0'
-  art_token:
+  artifactory_token:
     description: 'Frigate Artifactory token'
     required: true
 
@@ -52,7 +46,7 @@ runs:
     - name: Install JFrog CLI from Frigate
       uses: MorganStanley-Actions/train.setup-jfrog-cli@prod
       with:
-        saas-af-token: ${{ inputs.art_token }}
+        saas-af-token: ${{ inputs.artifactory_token }}
         version: 2.48.0
 
     - name: Setup Azure CLI via pip from Frigate
@@ -65,7 +59,7 @@ runs:
 
 ---
 
-## 🧩 3. GitHub Workflow: `.github/workflows/setup-azure-cli.yml`
+## ✅ 3. `.github/workflows/setup-azure-cli.yml`
 
 ```yaml
 name: Setup Azure CLI via Frigate
@@ -78,42 +72,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Use custom Azure CLI setup
+      - name: Use custom Azure CLI setup action
         uses: ./.github/actions/azure-cli-setup
         with:
-          art_token: ${{ secrets.ARTIFACTORY_TOKEN }}
+          artifactory_token: ${{ secrets.ARTIFACTORY_TOKEN }}
           version: '2.69.0'
 ```
 
-> 🔐 Make sure to set `ARTIFACTORY_TOKEN` in your repo's **Secrets**:
->
-> `Settings > Secrets and variables > Actions > New repository secret`
-
 ---
 
-### ✅ Directory Layout
+### 🔐 Secret Reminder
+
+Make sure this secret exists:
 
 ```
-.github/
-│
-├── actions/
-│   └── azure-cli-setup/
-│       ├── action.yml
-│       └── scripts/
-│           └── az_cli_setup.sh
-│
-└── workflows/
-    └── setup-azure-cli.yml
+Repo → Settings → Secrets and Variables → Actions → New secret
+Name: ARTIFACTORY_TOKEN
+Value: <your-frigate-token>
 ```
 
 ---
 
-Let me know if you also want:
-- A way to test Azure CLI install success (`az --version`)
-- To add caching or fallback if Artifactory is unavailable
-- Support for installing extensions like `azure-devops` or `aks` via CLI
-
-Happy to help you extend it!
+Let me know if you want to:
+- publish this to GitHub Marketplace,
+- bundle it into a shared repo for reuse,
+- or add validation/logging steps to the shell script.
