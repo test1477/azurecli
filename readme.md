@@ -1,123 +1,110 @@
-To implement the `setup-azure-cli` functionality you described using GitHub Actions and Azure CLI, you can create two components: one for the Bash script (`az_cli_setup.sh`) and one for the `action.yml` file to define the steps in the GitHub Action workflow.
+# Installing PowerShell via GitHub Actions with JFrog Artifactory
 
-### Step 1: Bash Script (`az_cli_setup.sh`)
+To install PowerShell in a GitHub Actions workflow while leveraging JFrog Artifactory for package management, follow this comprehensive guide:
 
-The Bash script is responsible for installing JFrog CLI and the Azure CLI with the given version. You can use the following script template, which aligns with your example:
-
-#### `scripts/az_cli_setup.sh`:
-
-```bash
-#!/bin/bash
-
-set -e
-
-# Retrieve the Azure CLI version passed as argument
-AZ_CLI_VERSION=${1}
-
-# Install JFrog CLI if not already installed
-jf pip-config --server-id-resolve msartaz --repo-resolve pypi repo
-
-# Upgrade pip
-jf pip install pip --upgrade --no-warn-script-location --no-compile --disable-pip-version-check
-
-# Install Azure CLI
-jf pip install azure-cli==$AZ_CLI_VERSION --no-warn-script-location --no-compile --disable-pip-version-check
-
-# Add Azure CLI to the system PATH
-echo "$HOME/.local/bin" >> $GITHUB_PATH
-```
-
-### Step 2: `action.yml` for GitHub Actions
-
-The `action.yml` file defines the parameters (such as the Azure CLI version and Artifactory token) and sets up the necessary steps to run the Bash script within a GitHub Actions workflow.
-
-#### `action.yml`:
+## Method 1: Using JFrog Artifactory (Recommended for Enterprise)
 
 ```yaml
-name: 'Azure-cli Setup'
-description: 'Setup Azure CLI in your GitHub Actions environment'
-inputs:
-  version:
-    description: 'Version of Azure CLI to install'
-    required: false
-    default: '2.66.0'
-  art_token:
-    description: 'Artifactory token'
-    required: true
+steps:
+  - name: Install JFrog CLI
+    uses: jfrog/setup-jfrog-cli@v2
 
-runs:
-  using: "composite"
-  steps:
-    - name: Install JFrog CLI
-      uses: eaton-vance/setup-jfrog-cli@v4
+  - name: Configure JFrog Artifactory
+    run: |
+      jf config add my-artifactory \
+        --url=https://your-company.jfrog.io/artifactory \
+        --access-token=${{ secrets.JFROG_ACCESS_TOKEN }}
 
-    - name: Setup Azure CLI
-      run: |
-        chmod +x scripts/az_cli_setup.sh
-        ./scripts/az_cli_setup.sh ${{ inputs.version }}
-      shell: bash
-      working-directory: ${{ github.action_path }}
+  - name: Install PowerShell via JFrog
+    run: |
+      # For Linux (Ubuntu/Debian)
+      jf rt download debian-remote/pool/main/p/powershell/ --flat
+      sudo dpkg -i powershell*.deb
+      
+      # For Windows
+      jf rt download generic-remote/powershell/ -flat
+      msiexec.exe /i powershell*.msi /quiet
+      
+      # Verify installation
+      pwsh --version
 ```
 
-### Step 3: GitHub Actions Workflow (Calling the Setup Action)
-
-In your GitHub Actions workflow file, you can use this custom action (`setup-azure-cli`) and call it to install the Azure CLI with the version specified by the input.
-
-#### Example `deploy_qa.yml`:
+## Method 2: Direct Installation (Simpler Approach)
 
 ```yaml
-name: deploy QA
+steps:
+  - name: Install PowerShell (Linux)
+    if: runner.os == 'Linux'
+    run: |
+      # Download from Microsoft's official repo
+      wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb
+      sudo dpkg -i packages-microsoft-prod.deb
+      sudo apt-get update
+      sudo apt-get install -y powershell
+      pwsh --version
 
-permissions:
-  contents: write
-  actions: write
-  id-token: write
+  - name: Install PowerShell (Windows)
+    if: runner.os == 'Windows'
+    run: |
+      winget install --id Microsoft.PowerShell --accept-package-agreements --accept-source-agreements
+      pwsh --version
 
-on:
-  workflow_call:
-
-env:
-  ARTIFACTORY_TOKEN: ${{ secrets.ARTIFACTORY_TOKEN }}
-
-jobs:
-  deploy-arm-qa:
-    runs-on: azure-nonprod
-    environment:
-      name: qa
-    outputs:
-      release_number: ${{ steps.setup_release_number.outputs.TRAIN_RELEASE }}
-
-    steps:
-      - name: Check out the repo
-        uses: actions/checkout@v4
-
-      - name: Install JFrog CLI
-        uses: eaton-vance/setup-jfrog-cli@v4
-        with:
-          version: 2.25.2
-          jfrog_token: ${{ secrets.ARTIFACTORY_TOKEN }}
-
-      - name: Setup Azure CLI
-        uses: ./path-to-your-action # Reference to your setup-azure-cli action
-        with:
-          version: 2.66.0
-          art_token: ${{ secrets.ARTIFACTORY_TOKEN }}
-
-      - name: Python Check
-        run: python -V && python -m pip -V
-        continue-on-error: true
+  - name: Install PowerShell (macOS)
+    if: runner.os == 'macOS'
+    run: |
+      brew install --cask powershell
+      pwsh --version
 ```
 
-### Explanation:
+## Method 3: Using JFrog with PowerShell Gallery
 
-1. **`az_cli_setup.sh`**: A Bash script that installs both JFrog CLI and Azure CLI with the specified version. It also ensures the necessary dependencies are updated (like pip).
+```yaml
+steps:
+  - name: Set up JFrog NuGet repository
+    run: |
+      jf dotnet-config --server-id-resolve=my-artifactory --repo-resolve=nuget-remote
 
-2. **`action.yml`**: A GitHub Action definition that provides inputs such as the version of the Azure CLI and Artifactory token. It then runs the Bash script to install the Azure CLI.
+  - name: Install PowerShell via JFrog NuGet
+    run: |
+      # Install PowerShell Core via .NET Global Tool
+      dotnet tool install --global PowerShell --version 7.3.4
+      pwsh --version
+```
 
-3. **GitHub Actions Workflow (`deploy_qa.yml`)**: A job that uses the custom action `setup-azure-cli` to install the Azure CLI and performs other tasks (such as Python version checks). The workflow also integrates with JFrog CLI.
+## Verification Step (All Methods)
 
-Make sure that:
-- The Artifactory token is stored in GitHub Secrets.
-- The path to your custom action (`setup-azure-cli`) is correct.
+```yaml
+  - name: Verify PowerShell installation
+    run: |
+      pwsh --version
+      pwsh -c "Write-Host 'PowerShell is working!'"
+```
 
-This setup should automate the installation of the Azure CLI as part of your deployment pipeline.
+## Key Considerations:
+
+1. **JFrog Configuration**:
+   - Ensure your Artifactory instance has the appropriate repositories configured (Debian for Linux packages, NuGet for .NET tools)
+   - Set up proper security permissions for your GitHub Actions runner
+
+2. **Platform Support**:
+   - PowerShell is available for Windows, Linux, and macOS
+   - Installation methods vary by platform
+
+3. **Version Pinning**:
+   - For production use, pin to specific versions
+   - Example: `sudo apt-get install -y powershell=7.3.4-1.ubuntu.22.04`
+
+4. **Proxy Settings** (if needed):
+   ```yaml
+   env:
+     HTTP_PROXY: http://your-proxy:port
+     HTTPS_PROXY: http://your-proxy:port
+   ```
+
+For enterprise environments, Method 1 is recommended as it provides:
+- Artifact traceability
+- Security scanning through JFrog Xray
+- Better performance through caching
+- Compliance with internal policies
+
+Would you like me to tailor this further for your specific JFrog repository structure or security requirements?
