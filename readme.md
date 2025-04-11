@@ -1,88 +1,90 @@
-The error occurs because the **.NET SDK is not installed** on your runner, which is required for `dotnet tool install`. Here's how to fix this for your **RHEL 7.9** system:
+Since your GitHub Actions runner is using **Ubuntu** (not RHEL as previously thought), here's the corrected approach to install PowerShell using `apt-get` while still leveraging your JFrog Artifactory:
 
 ---
 
-### **Solution 1: Install .NET SDK First (Recommended)**
-Add these steps **before** the PowerShell installation:
-
-```yaml
-- name: Install .NET 6.0 SDK (Required for dotnet tool)
-  run: |
-    sudo rpm -Uvh https://packages.microsoft.com/config/rhel/7/packages-microsoft-prod.rpm
-    sudo yum install -y dotnet-sdk-6.0
-    echo "export PATH=$PATH:$HOME/.dotnet" >> $HOME/.bashrc
-    source $HOME/.bashrc
-
-- name: Verify .NET installation
-  run: dotnet --version
-```
-
-Then proceed with your existing PowerShell install:
-```yaml
-- name: Install PowerShell via JFrog NuGet
-  run: |
-    jf dotnet-config --server-id-resolve=frigate --repo-resolve=nuget-remote
-    jf dotnet tool install -g PowerShell --version $PWSH_VERSION
-    echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
-```
-
----
-
-### **Solution 2: Alternative (No .NET Required) - Use Official RPM**
-If you prefer to avoid .NET dependencies:
-```yaml
-- name: Download and Install PowerShell RPM
-  run: |
-    curl -LO https://github.com/PowerShell/PowerShell/releases/download/v$PWSH_VERSION/powershell-$PWSH_VERSION-1.rhel.7.x86_64.rpm
-    sudo yum install -y ./powershell-$PWSH_VERSION-1.rhel.7.x86_64.rpm
-    pwsh --version
-  env:
-    PWSH_VERSION: 7.3.6
-```
-
----
-
-### **Key Fixes**
-| Issue | Solution |
-|-------|----------|
-| `dotnet: not found` | Install .NET 6.0 SDK first |
-| RHEL 7.9 compatibility | Use Microsoft's RPM package |
-| JFrog integration | Configure `nuget-remote` for .NET tools |
-
----
-
-### **Full Corrected Workflow**
+### **Corrected Ubuntu Installation via JFrog**
 ```yaml
 steps:
-  - name: Install .NET 6.0 SDK
+  - name: Install prerequisites
+    run: sudo apt-get update && sudo apt-get install -y wget apt-transport-https
+
+  - name: Configure JFrog for Debian packages
     run: |
-      sudo rpm -Uvh https://packages.microsoft.com/config/rhel/7/packages-microsoft-prod.rpm
-      sudo yum install -y dotnet-sdk-6.0
-      echo "$HOME/.dotnet" >> $GITHUB_PATH
+      # Add JFrog as a trusted source (if hosting Debian packages)
+      echo "deb [trusted=yes] https://frigate.jfrog.io/artifactory/debian-remote $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/jfrog.list
+      sudo apt-get update
 
-  - name: Configure JFrog NuGet
-    run: jf dotnet-config --server-id-resolve=frigate --repo-resolve=nuget-remote
-
-  - name: Install PowerShell
+  - name: Install PowerShell (from JFrog or Microsoft)
     run: |
-      jf dotnet tool install -g PowerShell --version $PWSH_VERSION
-      echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
-    env:
-      PWSH_VERSION: 7.3.6
-
-  - name: Verify
-    run: pwsh --version
+      # Try JFrog first, fallback to Microsoft if not found
+      if ! sudo apt-get install -y powershell; then
+        echo "Installing from Microsoft..."
+        wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb
+        sudo dpkg -i packages-microsoft-prod.deb
+        sudo apt-get update
+        sudo apt-get install -y powershell
+      fi
+      pwsh --version
 ```
 
 ---
 
-### **Why This Works**
-1. **.NET SDK** provides the `dotnet` command-line tool
-2. **JFrog NuGet** configuration allows secure package resolution
-3. **Global tool install** places `pwsh` in `$HOME/.dotnet/tools`
+### **Alternative: Python Package via JFrog PyPI**
+If you prefer using your existing PyPI remote:
+```yaml
+steps:
+  - name: Configure JFrog PyPI
+    run: jf pip-config --server-id-resolve=frigate --repo-resolve=pypi-remote
 
-For **enterprise environments**, ensure:
-- Your `nuget-remote` repository proxies `https://api.nuget.org/v3/index.json`
-- The JFrog service account has read permissions
+  - name: Install PowerShell Python package
+    run: |
+      python -m pip install powershell --user
+      echo "$HOME/.local/bin" >> $GITHUB_PATH
+      pwsh --version
+```
 
-Would you like me to provide the JFrog admin-side configuration for NuGet repositories?
+---
+
+### **Key Changes from Original Approach**
+| Issue | RHEL Solution | Ubuntu Correction |
+|-------|--------------|------------------|
+| Package Manager | `yum`/`rpm` | `apt-get`/`deb` |
+| Install Method | RPM package | Debian package |
+| JFrog Config | NuGet repo | Debian repo or PyPI |
+| Dependencies | `libicu` | `apt-transport-https` |
+
+---
+
+### **Verification**
+```yaml
+- name: Verify installation
+  run: |
+    pwsh --version
+    # Expected output: PowerShell 7.3.6
+```
+
+---
+
+### **Troubleshooting Ubuntu Issues**
+1. **If JFrog doesn't have Ubuntu packages**:
+   ```bash
+   # Fallback to Microsoft's repo
+   curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+   sudo apt-add-repository "deb [arch=amd64] https://packages.microsoft.com/ubuntu/$(lsb_release -rs)/prod $(lsb_release -cs) main"
+   sudo apt-get install -y powershell
+   ```
+
+2. **Permission issues**:
+   ```bash
+   sudo chown -R $USER:$USER /usr/local/share/powershell
+   ```
+
+---
+
+### **Recommended Approach**
+For Ubuntu runners:
+1. **Use Microsoft's official Debian packages** (most reliable)
+2. **Only use JFrog PyPI** if you need Python integration
+3. **Avoid .NET global tools** on Ubuntu unless already configured
+
+Would you like me to provide the JFrog admin steps to configure a Debian repository for Ubuntu packages?
