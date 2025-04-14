@@ -1,103 +1,104 @@
-Here's a complete guide to **create local repositories in JFrog Artifactory** for Azure CLI and PowerShell, upload the latest versions, and use them in your GitHub Actions workflow:
+Here's the **corrected approach** for using your custom `tf-providers-powershell` repository in JFrog Artifactory:
 
 ---
 
-### **Step 1: Create Local Repositories in JFrog**
-#### **For PowerShell (Debian Package)**
-1. Go to **Admin → Repositories → Local → New Local Repository**
-   - **Package Type**: Debian  
-   - **Repository Key**: `debian-powershell`  
-   - **Layout**: `simple-default`  
-   - **Checksum Policy**: `verify-if-exists`
-
-#### **For Azure CLI (PyPI Package)**
-1. Create another local repository:  
-   - **Package Type**: PyPI  
-   - **Repository Key**: `pypi-azure-cli`  
-   - **Layout**: `simple-default`
-
----
-
-### **Step 2: Upload Packages to JFrog**
-#### **Upload PowerShell (Debian Package)**
-```bash
-# Download the latest PowerShell .deb package
-curl -LO https://packages.microsoft.com/ubuntu/$(lsb_release -rs)/prod/pool/main/p/powershell/powershell_7.4.2-1.deb_amd64.deb
-
-# Upload to JFrog
-jf rt upload powershell_*.deb debian-powershell/pool/main/p/powershell/ --flat=false
-```
-
-#### **Upload Azure CLI (PyPI Package)**
-```bash
-# Download Azure CLI wheel
-pip download azure-cli --no-deps -d .
-
-# Upload to JFrog
-jf rt upload azure_cli-*.whl pypi-azure-cli/
-```
-
----
-
-### **Step 3: Configure GitHub Actions Workflow**
-#### **Install PowerShell**
+### **Fixed Workflow for Custom Debian Repository**
 ```yaml
-steps:
-  - name: Add JFrog Debian repo
-    run: |
-      echo "deb [trusted=yes] https://your-company.jfrog.io/artifactory/debian-powershell $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/jfrog-powershell.list
-      sudo apt-get update
+name: Install PowerShell from tf-providers-powershell
 
-  - name: Install PowerShell
-    run: sudo apt-get install -y powershell
-```
+jobs:
+  install-powershell:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add authenticated JFrog repository
+        run: |
+          # For Ubuntu 20.04 (focal)
+          echo "deb [trusted=yes] https://${{ secrets.JFROG_USER }}:${{ secrets.JFROG_ACCESS_TOKEN }}@frigate.jfrog.io/artifactory/tf-providers-powershell focal main" | \
+            sudo tee /etc/apt/sources.list.d/jfrog-powershell.list
+          
+          sudo apt-get update
 
-#### **Install Azure CLI**
-```yaml
-  - name: Configure JFrog PyPI
-    run: jf pip-config --server-id-resolve=frigate --repo-resolve=pypi-azure-cli
+      - name: Install PowerShell
+        run: sudo apt-get install -y powershell
 
-  - name: Install Azure CLI
-    run: |
-      pip install azure-cli --user
-      echo "$HOME/.local/bin" >> $GITHUB_PATH
-```
-
----
-
-### **Step 4: Verify Installations**
-```yaml
-  - name: Check versions
-    run: |
-      pwsh --version
-      az --version
+      - name: Verify installation
+        run: pwsh --version
 ```
 
 ---
 
-### **Key Advantages**
-| Feature | Benefit |
-|---------|---------|
-| **Controlled Versions** | Pin specific versions in your repo |
-| **Air-Gapped Support** | Works offline after initial upload |
-| **Security** | Scan packages with JFrog Xray |
-| **Performance** | Faster than downloading from public sources |
-
----
-
-### **Maintenance Tips**
-1. **Update Packages**:
-   ```bash
-   # PowerShell
-   curl -LO https://packages.microsoft.com/ubuntu/.../powershell_X.Y.Z.deb
-   jf rt upload powershell_*.deb debian-powershell/...
-
-   # Azure CLI
-   pip download azure-cli==2.71.0
-   jf rt upload azure_cli-*.whl pypi-azure-cli/
+### **Key Requirements**
+1. **Repository Structure Must Match**:
+   ```
+   tf-providers-powershell/
+   ├── dists/
+   │   └── focal/          # Distribution codename (e.g., focal for Ubuntu 20.04)
+   │       └── main/       # Component
+   │           └── binary-amd64/
+   │               ├── Packages
+   │               └── Packages.gz
+   └── pool/
+       └── main/
+           └── p/
+               └── powershell/
+                   └── powershell_7.4.2-1.deb
    ```
 
-2. **Automate Syncs** (Optional):
-   - Set up **Artifactory User Plugins** to auto-download new releases.
+2. **Authentication**:
+   - Credentials are embedded in the URL (`user:token@domain`)
+   - Alternative: Use `/etc/apt/auth.conf` for better security
 
-Would you like me to provide the exact JFrog REST API commands to automate uploads?
+---
+
+### **Troubleshooting 403 Errors**
+If you still get **403 Forbidden**, verify:
+
+1. **Credentials**:
+   ```bash
+   # Test repository access
+   curl -u ${{ secrets.JFROG_USER }}:${{ secrets.JFROG_ACCESS_TOKEN }} \
+     https://frigate.jfrog.io/artifactory/tf-providers-powershell/dists/focal/main/binary-amd64/Packages
+   ```
+
+2. **Permissions**:
+   - Ensure the GitHub Actions user has **read** access to:
+     - `tf-providers-powershell`
+     - All parent folders
+
+3. **Repository Layout**:
+   ```bash
+   # Check if Packages.gz exists
+   curl -I https://frigate.jfrog.io/artifactory/tf-providers-powershell/dists/focal/main/binary-amd64/Packages.gz
+   ```
+
+---
+
+### **Alternative (More Secure) Authentication**
+```yaml
+- name: Configure APT auth
+  run: |
+    echo "machine frigate.jfrog.io
+    login ${{ secrets.JFROG_USER }}
+    password ${{ secrets.JFROG_ACCESS_TOKEN }}" | sudo tee /etc/apt/auth.conf.d/jfrog.conf
+    sudo chmod 600 /etc/apt/auth.conf.d/jfrog.conf
+
+- name: Add repository (no credentials in URL)
+  run: |
+    echo "deb https://frigate.jfrog.io/artifactory/tf-providers-powershell focal main" | \
+      sudo tee /etc/apt/sources.list.d/jfrog-powershell.list
+```
+
+---
+
+### **Final Checks**
+1. **Verify Package Availability**:
+   ```bash
+   sudo apt-cache policy powershell
+   ```
+
+2. **Manual Download Test**:
+   ```bash
+   curl -u $USER:$TOKEN -LO https://frigate.jfrog.io/artifactory/tf-providers-powershell/pool/main/p/powershell/powershell_7.4.2-1.deb
+   ```
+
+This matches your documented approach while ensuring proper authentication and repository structure. The key is maintaining the exact Debian repository layout in your `tf-providers-powershell` repo.
