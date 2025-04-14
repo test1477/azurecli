@@ -1,90 +1,103 @@
-Since your GitHub Actions runner is using **Ubuntu** (not RHEL as previously thought), here's the corrected approach to install PowerShell using `apt-get` while still leveraging your JFrog Artifactory:
+Here's a complete guide to **create local repositories in JFrog Artifactory** for Azure CLI and PowerShell, upload the latest versions, and use them in your GitHub Actions workflow:
 
 ---
 
-### **Corrected Ubuntu Installation via JFrog**
+### **Step 1: Create Local Repositories in JFrog**
+#### **For PowerShell (Debian Package)**
+1. Go to **Admin → Repositories → Local → New Local Repository**
+   - **Package Type**: Debian  
+   - **Repository Key**: `debian-powershell`  
+   - **Layout**: `simple-default`  
+   - **Checksum Policy**: `verify-if-exists`
+
+#### **For Azure CLI (PyPI Package)**
+1. Create another local repository:  
+   - **Package Type**: PyPI  
+   - **Repository Key**: `pypi-azure-cli`  
+   - **Layout**: `simple-default`
+
+---
+
+### **Step 2: Upload Packages to JFrog**
+#### **Upload PowerShell (Debian Package)**
+```bash
+# Download the latest PowerShell .deb package
+curl -LO https://packages.microsoft.com/ubuntu/$(lsb_release -rs)/prod/pool/main/p/powershell/powershell_7.4.2-1.deb_amd64.deb
+
+# Upload to JFrog
+jf rt upload powershell_*.deb debian-powershell/pool/main/p/powershell/ --flat=false
+```
+
+#### **Upload Azure CLI (PyPI Package)**
+```bash
+# Download Azure CLI wheel
+pip download azure-cli --no-deps -d .
+
+# Upload to JFrog
+jf rt upload azure_cli-*.whl pypi-azure-cli/
+```
+
+---
+
+### **Step 3: Configure GitHub Actions Workflow**
+#### **Install PowerShell**
 ```yaml
 steps:
-  - name: Install prerequisites
-    run: sudo apt-get update && sudo apt-get install -y wget apt-transport-https
-
-  - name: Configure JFrog for Debian packages
+  - name: Add JFrog Debian repo
     run: |
-      # Add JFrog as a trusted source (if hosting Debian packages)
-      echo "deb [trusted=yes] https://frigate.jfrog.io/artifactory/debian-remote $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/jfrog.list
+      echo "deb [trusted=yes] https://your-company.jfrog.io/artifactory/debian-powershell $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/jfrog-powershell.list
       sudo apt-get update
 
-  - name: Install PowerShell (from JFrog or Microsoft)
-    run: |
-      # Try JFrog first, fallback to Microsoft if not found
-      if ! sudo apt-get install -y powershell; then
-        echo "Installing from Microsoft..."
-        wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb
-        sudo dpkg -i packages-microsoft-prod.deb
-        sudo apt-get update
-        sudo apt-get install -y powershell
-      fi
-      pwsh --version
+  - name: Install PowerShell
+    run: sudo apt-get install -y powershell
 ```
 
----
-
-### **Alternative: Python Package via JFrog PyPI**
-If you prefer using your existing PyPI remote:
+#### **Install Azure CLI**
 ```yaml
-steps:
   - name: Configure JFrog PyPI
-    run: jf pip-config --server-id-resolve=frigate --repo-resolve=pypi-remote
+    run: jf pip-config --server-id-resolve=frigate --repo-resolve=pypi-azure-cli
 
-  - name: Install PowerShell Python package
+  - name: Install Azure CLI
     run: |
-      python -m pip install powershell --user
+      pip install azure-cli --user
       echo "$HOME/.local/bin" >> $GITHUB_PATH
-      pwsh --version
 ```
 
 ---
 
-### **Key Changes from Original Approach**
-| Issue | RHEL Solution | Ubuntu Correction |
-|-------|--------------|------------------|
-| Package Manager | `yum`/`rpm` | `apt-get`/`deb` |
-| Install Method | RPM package | Debian package |
-| JFrog Config | NuGet repo | Debian repo or PyPI |
-| Dependencies | `libicu` | `apt-transport-https` |
-
----
-
-### **Verification**
+### **Step 4: Verify Installations**
 ```yaml
-- name: Verify installation
-  run: |
-    pwsh --version
-    # Expected output: PowerShell 7.3.6
+  - name: Check versions
+    run: |
+      pwsh --version
+      az --version
 ```
 
 ---
 
-### **Troubleshooting Ubuntu Issues**
-1. **If JFrog doesn't have Ubuntu packages**:
-   ```bash
-   # Fallback to Microsoft's repo
-   curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
-   sudo apt-add-repository "deb [arch=amd64] https://packages.microsoft.com/ubuntu/$(lsb_release -rs)/prod $(lsb_release -cs) main"
-   sudo apt-get install -y powershell
-   ```
-
-2. **Permission issues**:
-   ```bash
-   sudo chown -R $USER:$USER /usr/local/share/powershell
-   ```
+### **Key Advantages**
+| Feature | Benefit |
+|---------|---------|
+| **Controlled Versions** | Pin specific versions in your repo |
+| **Air-Gapped Support** | Works offline after initial upload |
+| **Security** | Scan packages with JFrog Xray |
+| **Performance** | Faster than downloading from public sources |
 
 ---
 
-### **Recommended Approach**
-For Ubuntu runners:
-1. **Use Microsoft's official Debian packages** (most reliable)
-2. **Only use JFrog PyPI** if you need Python integration
-3. **Avoid .NET global tools** on Ubuntu unless already configured
+### **Maintenance Tips**
+1. **Update Packages**:
+   ```bash
+   # PowerShell
+   curl -LO https://packages.microsoft.com/ubuntu/.../powershell_X.Y.Z.deb
+   jf rt upload powershell_*.deb debian-powershell/...
 
-Would you like me to provide the JFrog admin steps to configure a Debian repository for Ubuntu packages?
+   # Azure CLI
+   pip download azure-cli==2.71.0
+   jf rt upload azure_cli-*.whl pypi-azure-cli/
+   ```
+
+2. **Automate Syncs** (Optional):
+   - Set up **Artifactory User Plugins** to auto-download new releases.
+
+Would you like me to provide the exact JFrog REST API commands to automate uploads?
